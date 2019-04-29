@@ -28,7 +28,6 @@ class Crowler:
 
     def create_index(self, es_object, index_name):
         created = False
-        # index settings
         settings = {
             "settings": {
                 "number_of_shards": 1,
@@ -61,16 +60,11 @@ class Crowler:
             return created
 
     async def get_links(self, page):
-        # temp_links = []
-        # page = requests.get(url).text
         soup = BeautifulSoup(page, features="html.parser")
         await asyncio.sleep(0)
         absolute_links = list(map(lambda x: x if x.startswith(('http://', 'https://')) else urljoin(start_url, x),
                                   [i.get('href', '') for i in soup.find_all('a')]))
         links = [urldefrag(x)[0] for x in absolute_links if x.startswith(self.domain)]
-
-        # data = await self.beautify_text(soup)
-
         return list(set(links)), soup
 
     async def store_record(self, elastic_object, index_name, record):
@@ -85,28 +79,11 @@ class Crowler:
         finally:
             return is_stored
 
-    #
-    # async def spider(self,start_link,es,i):
-    #     links_to_visit = [start_link]
-    #     for link in links_to_visit:
-    #         print(start_link,link,i)
-    #         new_links, data = await self.get_links(await requests.get(link).text)
-    #         res = {"link": link, "text": data}
-    #         if self.create_index(es, self.index_url):
-    #             await self.store_record(es, self.index_url, res)
-    #             # print('Data indexed successfully',res)
-    #         for new_link in new_links:
-    #             if new_link not in self.links and new_link not in links_to_visit:
-    #                 self.links.append(new_link)
-    #                 links_to_visit.append(new_link)
     async def spider(self, start_link, es, i, session):
         links_to_visit = [start_link]
         async with session.get(start_link) as response:
             for link in links_to_visit:
-                # print(start_link, link, i)
                 new_links,soup = await self.get_links(await response.text())
-
-                # res = {"link": link, "text": data}
                 if self.create_index(es, self.index_url):
                     await self.store_record(es, self.index_url, {"link": link, "text": await self.beautify_text(soup)})
                     print('Data indexed successfully')
@@ -115,20 +92,9 @@ class Crowler:
                         self.links.append(new_link)
                         links_to_visit.append(new_link)
                 print(i,self.links)
-        # await session.close()
 
+                # await asyncio.sleep(1/self.rps)
 
-    # async def main(self):
-    #     es = await self.connect_elasticsearch()
-    #     links_to_visit, data = await self.get_links(await requests.get(start_url).text)
-    #     print(links_to_visit)
-    #     self.links.append(links_to_visit)
-    #     tasks = []
-    #     for i,link in enumerate(links_to_visit):
-    #         task = asyncio.create_task(self.spider(link,es,i))
-    #         tasks.append(task)
-    #     await asyncio.gather(*tasks)
-    #     await es.close()
     async def main(self):
         es = self.connect_elasticsearch()
         tasks = []
@@ -167,7 +133,7 @@ class Crowler:
 import time
 
 if __name__ == '__main__':
-    craw = Crowler(start_url, 10, 200)
+    craw = Crowler(start_url, 100, 200)
     begin = time.time()
     asyncio.run(craw.main())
     print(len(craw.links))
