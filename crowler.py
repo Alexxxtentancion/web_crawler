@@ -6,15 +6,15 @@ from aioelasticsearch import Elasticsearch
 from bs4 import BeautifulSoup
 import requests
 start_url = 'http://fargo-online.net/'
-
+index_url = start_url.translate({ord(i): None for i in """"[*\>:\<'"|/?]"""})
 
 class Crowler:
     def __init__(self, url, rps, max_pages):
         self.url = url
+        self.id =0
         self.rps = rps
         self.links = [url]
         self.domain = '{uri.scheme}://{uri.netloc}/'.format(uri=urlparse(start_url))
-        self.index_url = start_url.translate({ord(i): None for i in """"[*\>:\<'"|/?]"""})
 
     @staticmethod
     def connect_elasticsearch():
@@ -67,10 +67,10 @@ class Crowler:
         links = [urldefrag(x)[0] for x in absolute_links if x.startswith(self.domain)]
         return list(set(links)), soup
 
-    async def store_record(self, elastic_object, index_name, record):
+    async def store_record(self, elastic_object, index_name,_id, record):
         is_stored = True
         try:
-            outcome = await elastic_object.index(index=index_name, doc_type='page', body=record)
+            outcome = await elastic_object.index(index=index_name,doc_type='page',body=record,id=_id)
             # print(outcome)
         except Exception as ex:
             print('Error in indexing data')
@@ -84,8 +84,9 @@ class Crowler:
         async with session.get(start_link) as response:
             for link in links_to_visit:
                 new_links,soup = await self.get_links(await response.text())
-                if self.create_index(es, self.index_url):
-                    await self.store_record(es, self.index_url, {"link": link, "text": await self.beautify_text(soup)})
+                if self.create_index(es, index_url):
+                    self.id+=1
+                    await self.store_record(es, index_url,self.id, {"link": link, "text": await self.beautify_text(soup)})
                     print('Data indexed successfully')
                 for new_link in new_links:
                     if new_link not in self.links and new_link not in links_to_visit:
@@ -101,8 +102,8 @@ class Crowler:
         async with aiohttp.ClientSession() as session:
             async with session.get(start_url) as resp:
                 links_to_visit, soup = await self.get_links(await resp.text())
-                if self.create_index(es, self.index_url):
-                    await self.store_record(es, self.index_url, {"link": start_url, "text": await self.beautify_text(soup)})
+                if self.create_index(es, index_url):
+                    await self.store_record(es, index_url,self.id, {"link": start_url, "text": await self.beautify_text(soup)})
                     print('Data indexed successfully')
 
                 self.links.append(links_to_visit)
