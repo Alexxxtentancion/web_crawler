@@ -1,16 +1,16 @@
 import asyncio
 from urllib.parse import urljoin, urldefrag, urlparse
-import asyncpool
+
 import aiohttp
 from aioelasticsearch import Elasticsearch
 from bs4 import BeautifulSoup
-import logging
+
 start_url = 'http://fargo-online.net/'
 index_url = start_url.translate({ord(i): None for i in """"[*\>:\<'"|/?]"""})
 
 
 class Crowler:
-    def __init__(self, url, rps, max_pages):
+    def __init__(self, url, rps):
         self.url = url
         self.id = 0
         self.rps = rps
@@ -71,8 +71,7 @@ class Crowler:
     async def store_record(self, elastic_object, index_name, _id, record):
         is_stored = True
         try:
-            outcome = await elastic_object.index(index=index_name, doc_type='page', body=record, id=_id)
-            # print(outcome)
+            await elastic_object.index(index=index_name, doc_type='page', body=record, id=_id)
         except Exception as ex:
             print('Error in indexing data')
             print(str(ex))
@@ -80,42 +79,35 @@ class Crowler:
         finally:
             return is_stored
 
-    async def spider(self, start_link, es,session,result_q):
-        # print(start_link)
-        for link in self.links:
-            # print(link)
+    async def spider(self, es, session, result_q, i):
+        while True:
+            link = await result_q.get()
             async with session.get(link) as response:
                 new_links, soup = await self.get_links(await response.text())
-            # if await self.create_index(es, index_url):
-            #     self.id += 1
-            #     await self.store_record(es, index_url, self.id, {"link": link, "text": await self.beautify_text(soup)})
-                await result_q.put(link)
+            if await self.create_index(es, index_url):
+                self.id += 1
+                await self.store_record(es, index_url, self.id, {"link": link, "text": await self.beautify_text(soup)})
             for new_link in new_links:
-                if (new_link not in self.links):
+                if new_link not in self.links:
                     self.links.append(new_link)
+                    await result_q.put(new_link)
 
-
-    async def writer(self,queue):
-        while True:
-            value = await queue.get()
-            if value is None:
+            if result_q.empty():
+                result_q.task_done()
                 break
-            print(value)
 
-    async def main(self,loop):
+    async def main(self):
+        tasks = []
         es = await self.connect_elasticsearch()
         result_queue = asyncio.Queue()
+        result_queue.put_nowait(self.url)
+
         async with aiohttp.ClientSession() as session:
-            reader_future = asyncio.ensure_future(self.writer(result_queue))
-            async with asyncpool.AsyncPool(loop, num_workers=2, name="ExamplePool",
-                                           logger=logging.getLogger("ExamplePool"),
-                                           worker_co=self.spider, max_task_time=300,
-                                           log_every_n=10) as pool:
-
-                await pool.push(self.url,es,session,result_queue)
-        await result_queue.put(None)
-        await reader_future
-
+            for i in range(self.rps):
+                task = asyncio.create_task(self.spider(es, session, result_queue, i))
+                tasks.append(task)
+            await asyncio.wait(tasks)
+        await es.close()
 
     @staticmethod
     async def beautify_text(soup):
@@ -133,9 +125,8 @@ class Crowler:
 import time
 
 if __name__ == '__main__':
-    craw = Crowler(start_url, 100, 200)
+    craw = Crowler(start_url, 4)
     begin = time.time()
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(craw.main(loop))
+    asyncio.run(craw.main())
     print(len(craw.links))
     print(time.time() - begin)

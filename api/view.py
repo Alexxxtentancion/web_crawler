@@ -1,12 +1,10 @@
 from aiohttp import web
 import json
 from crowler import index_url
-from aioelasticsearch import Elasticsearch
 
 
-async def search(request):
+async def search(request,es):
     try:
-        es = Elasticsearch([{'host': 'localhost', 'port': 9200}])
         query = request.query['q']
         limit = request.query['limit']
         offset = request.query['offset']
